@@ -78,3 +78,4 @@ After setting secrets, every `git push` to `main` auto-deploys both worker + fro
 - API keys stored as encrypted Cloudflare Secrets (never in code)
 - App is PIN-locked — only accessible by you
 - All data stays within your own Cloudflare account
+

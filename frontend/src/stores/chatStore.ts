@@ -11,16 +11,12 @@ export interface Message {
   isStreaming?: boolean
 }
 
-export type AgentMode = 'chat' | 'research' | 'tasks' | 'notes'
-
 interface ChatState {
   messages: Message[]
-  mode: AgentMode
   isLoading: boolean
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => string
   updateMessage: (id: string, content: string, isStreaming?: boolean) => void
   clearChat: () => void
-  setMode: (mode: AgentMode) => void
   setLoading: (v: boolean) => void
 }
 
@@ -28,16 +24,12 @@ export const useChatStore = create<ChatState>()(
   persist(
     (set) => ({
       messages: [],
-      mode: 'chat',
       isLoading: false,
 
       addMessage: (msg) => {
         const id = crypto.randomUUID()
         set((state) => ({
-          messages: [
-            ...state.messages,
-            { ...msg, id, timestamp: Date.now() },
-          ],
+          messages: [...state.messages, { ...msg, id, timestamp: Date.now() }],
         }))
         return id
       },
@@ -50,17 +42,13 @@ export const useChatStore = create<ChatState>()(
         })),
 
       clearChat: () => set({ messages: [] }),
-      setMode: (mode) => set({ mode }),
       setLoading: (isLoading) => set({ isLoading }),
     }),
     {
       name: 'jarvis-chat',
-      // Keep last 50 messages only
       partialize: (state) => ({
-        messages: state.messages.slice(-50),
-        mode: state.mode,
+        messages: state.messages.slice(-60),
       }),
     }
   )
 )
-

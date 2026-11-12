@@ -1,30 +1,23 @@
 import { useState } from 'react'
 import { useAuthStore } from '../stores/authStore'
-import { Sparkles } from 'lucide-react'
+import MindSphere from './MindSphere'
 
 export default function LockScreen() {
   const { login } = useAuthStore()
-  const [pin, setPin] = useState('')
+  const [pin, setPin]     = useState('')
   const [error, setError] = useState(false)
   const [shake, setShake] = useState(false)
 
   const handleKey = (key: string) => {
-    if (key === 'del') {
-      setPin((p) => p.slice(0, -1))
-      setError(false)
-      return
-    }
+    if (key === 'del') { setPin(p => p.slice(0, -1)); setError(false); return }
     if (pin.length >= 4) return
     const next = pin + key
     setPin(next)
-
     if (next.length === 4) {
       setTimeout(() => {
         const ok = login(next)
         if (!ok) {
-          setShake(true)
-          setError(true)
-          setPin('')
+          setShake(true); setError(true); setPin('')
           setTimeout(() => setShake(false), 600)
         }
       }, 150)
@@ -34,71 +27,66 @@ export default function LockScreen() {
   const keys = ['1','2','3','4','5','6','7','8','9','','0','del']
 
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6 safe-top safe-bottom gap-10">
+    <div className="flex flex-col items-center justify-between h-full bg-black px-6 pt-safe pb-safe">
 
-      {/* Logo / Identity */}
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-20 h-20 bg-accent/10 border border-accent/30 rounded-3xl flex items-center justify-center">
-          <Sparkles className="w-10 h-10 text-accent" />
+      {/* Top — sphere + title */}
+      <div className="flex-1 flex flex-col items-center justify-center gap-4">
+        <MindSphere state="idle" size={160} />
+        <div className="text-center mt-2">
+          <h1 className="jarvis-title text-2xl text-white">Jarvis</h1>
+          <p className="text-gray-600 text-xs mt-1 tracking-widest uppercase">Personal AI</p>
         </div>
-        <h1 className="text-2xl font-semibold text-white">Jarvis</h1>
-        <p className="text-sm text-slate-400">Your Private AI Assistant</p>
       </div>
 
-      {/* PIN Dots */}
-      <div className={`flex gap-4 ${shake ? 'animate-[wiggle_0.5s_ease-in-out]' : ''}`}
-        style={shake ? { animation: 'shake 0.5s ease-in-out' } : {}}>
-        {[0,1,2,3].map((i) => (
-          <div
-            key={i}
-            className={`w-4 h-4 rounded-full border-2 transition-all duration-200 ${
+      {/* PIN UI */}
+      <div className="w-full max-w-xs pb-8 flex flex-col items-center gap-6">
+
+        {/* Dots */}
+        <div
+          className="flex gap-5"
+          style={shake ? { animation: 'shake 0.5s ease-in-out' } : {}}
+        >
+          {[0,1,2,3].map(i => (
+            <div key={i} className={`w-3.5 h-3.5 rounded-full border-2 transition-all duration-200 ${
               pin.length > i
-                ? error
-                  ? 'bg-red-400 border-red-400'
-                  : 'bg-accent border-accent'
-                : 'border-slate-600 bg-transparent'
-            }`}
-          />
-        ))}
-      </div>
-      {error && (
-        <p className="text-red-400 text-sm -mt-6 animate-fade-up">Wrong PIN. Try again.</p>
-      )}
+                ? error ? 'bg-red-500 border-red-500' : 'bg-purple-400 border-purple-400'
+                : 'border-gray-700 bg-transparent'
+            }`} />
+          ))}
+        </div>
 
-      {/* Numpad */}
-      <div className="grid grid-cols-3 gap-4 w-full max-w-xs">
-        {keys.map((k, i) => (
-          k === '' ? (
-            <div key={i} />
-          ) : (
-            <button
-              key={i}
-              onClick={() => handleKey(k)}
-              className={`
-                h-16 rounded-2xl text-xl font-medium transition-all duration-150 active:scale-90
-                ${k === 'del'
-                  ? 'text-slate-400 bg-transparent hover:bg-surface-hover text-base'
-                  : 'bg-surface-card hover:bg-surface-hover text-white border border-surface-border'}
-              `}
-            >
-              {k === 'del' ? '⌫' : k}
-            </button>
-          )
-        ))}
-      </div>
+        {error && <p className="text-red-400 text-xs -mt-3 animate-fade-up">गलत PIN। फिर से कोशिश करें।</p>}
 
-      <p className="text-xs text-slate-600 mt-auto pb-4">Only you have access to this app.</p>
+        {/* Numpad */}
+        <div className="grid grid-cols-3 gap-3 w-full">
+          {keys.map((k, i) => (
+            k === '' ? <div key={i} /> : (
+              <button
+                key={i}
+                onClick={() => handleKey(k)}
+                className={`h-14 rounded-2xl text-lg font-medium transition-all duration-150 active:scale-90
+                  ${k === 'del'
+                    ? 'text-gray-500 bg-transparent text-base'
+                    : 'bg-gray-900 hover:bg-gray-800 text-white border border-gray-800'}`}
+              >
+                {k === 'del' ? '⌫' : k}
+              </button>
+            )
+          ))}
+        </div>
+
+        <p className="text-xs text-gray-800 tracking-wide">केवल आपके लिए</p>
+      </div>
 
       <style>{`
         @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-8px); }
-          40% { transform: translateX(8px); }
-          60% { transform: translateX(-6px); }
-          80% { transform: translateX(6px); }
+          0%,100% { transform: translateX(0); }
+          20%      { transform: translateX(-8px); }
+          40%      { transform: translateX(8px); }
+          60%      { transform: translateX(-6px); }
+          80%      { transform: translateX(6px); }
         }
       `}</style>
     </div>
   )
 }
-
