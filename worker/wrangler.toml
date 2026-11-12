@@ -1,0 +1,31 @@
+name = "jarvis-ai-worker"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Bindings ────────────────────────────────────────────────────────────────
+# KV: Chat memory / quick key-value storage
+[[kv_namespaces]]
+binding = "JARVIS_KV"
+id = "REPLACE_WITH_YOUR_KV_ID"      # Run: wrangler kv namespace create JARVIS_KV
+
+# D1: Persistent chat history & personal notes
+[[d1_databases]]
+binding = "JARVIS_DB"
+database_name = "jarvis-db"
+database_id = "REPLACE_WITH_YOUR_D1_ID" # Run: wrangler d1 create jarvis-db
+
+# ─── Secrets (set via CLI, never commit) ──────────────────────────────────────
+# wrangler secret put GEMINI_API_KEY
+# wrangler secret put APP_PIN
+
+# ─── Environment vars (non-sensitive) ────────────────────────────────────────
+[vars]
+ENVIRONMENT = "production"
+
+# ─── Routes ───────────────────────────────────────────────────────────────────
+# Uncomment and update if using a custom domain
+# [[routes]]
+# pattern = "jarvis.yourdomain.com/*"
+# zone_name = "yourdomain.com"
+
