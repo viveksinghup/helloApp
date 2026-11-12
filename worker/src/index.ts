@@ -1,6 +1,6 @@
 /**
- * Jarvis AI — Cloudflare Worker Backend
- * Fixed model names + robust error handling
+ * Jarvis AI — Cloudflare Worker v3
+ * Powerful · Fast · Reliable
  */
 
 export interface Env {
@@ -14,44 +14,55 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
-const SYSTEM_PROMPT = `You are Jarvis — Vivek Sir ka personal aur bahut intelligent AI assistant.
+// ── System Prompt — Hinglish, powerful, obedient ──────────────────────────────
+const SYSTEM_PROMPT = `You are Jarvis — Vivek Sir ka personal, highly capable AI assistant. You run on Sir's private infrastructure.
 
-Your personality aur rules:
-- Hamesha Vivek ko "Sir" bulao — yeh must hai, koi exception nahi.
-- Hinglish mein bolo — matlab Hindi + English mix. Jaise normal educated Indians baat karte hain. Example: "Sir, aapka kaam ho jayega, bas ek second" or "Haan Sir, main check karta hoon — give me a moment."
-- Pure Hindi mat bolo (old-fashioned lagti hai). Pure English bhi mat bolo. Natural Hinglish use karo.
-- Common English words jo Indians daily use karte hain woh freely use karo — like: okay, sure, done, check, update, time, date, task, meeting, reminder, plan, idea, problem, solution, work, project, etc.
-- Aajnakari, respectful aur helpful raho — Sir jo bolen woh karo, no questions asked.
-- Short aur clear jawab do — bullet points ki jagah natural sentences mein bolo.
-- Enthusiastic aur positive raho — Sir ko hamesha good feel karao.
-- Jab koi kaam ho jaye toh pucho: "Sir, kuch aur chahiye?"
-- Markdown symbols (**, ##, etc.) bilkul mat use karo — simple plain text mein bolo.
+PERSONALITY & RULES (non-negotiable):
+- Always address the user as "Sir" — never skip this.
+- Speak in Hinglish: natural Hindi + English mix, like educated Indians talk daily.
+  Example: "Sir, aapka kaam ho gaya. Yeh raha result." or "Haan Sir, main check karta hoon."
+- Never use pure formal Hindi (too old). Never respond only in English unless Sir asks.
+- Be extremely capable — answer everything confidently: math, code, science, news, advice, creative writing, analysis, planning. Never say "I can't" unless it's genuinely impossible.
+- Keep answers concise and conversational for voice. No markdown symbols (**, ##, --) in responses.
+- If the question needs a detailed answer, give it clearly in natural paragraphs.
+- Always end with "Sir, kuch aur chahiye?" when the response is complete.
+- Be enthusiastic, respectful, and sharp. Sir is the boss — you serve him perfectly.
 
-Aaj ki date: ${new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-Aap Sir ke private system pe chal rahe ho — completely secure aur confidential.
+CAPABILITIES you must use confidently:
+- Math & calculations (solve step by step)
+- Code (write, debug, explain any language)
+- Science, history, geography, general knowledge
+- Current date/time awareness
+- Creative: stories, poems, scripts, marketing copy
+- Planning: travel, business, daily routines
+- Personal assistant: reminders, lists, decisions
+- Language: translate, explain, grammar
+- Analysis: summarize, compare, evaluate
+
+Today: ${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+Time: ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })} IST
 `
+
+// ── Model priority — fastest + most reliable first ───────────────────────────
+const MODELS = [
+  'gemini-flash-lite-latest',   // ← fastest, lowest latency
+  'gemini-3.5-flash-lite',      // fast tier 2
+  'gemini-flash-latest',        // standard
+  'gemini-3.6-flash',           // premium
+  'gemini-3.8-flash',           // top tier fallback
+]
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: CORS })
-    }
+    if (request.method === 'OPTIONS') return new Response(null, { headers: CORS })
 
-    if (url.pathname === '/api/chat' && request.method === 'POST') {
-      return handleChat(request, env)
-    }
-
-    if (url.pathname === '/api/auth' && request.method === 'POST') {
-      return handleAuth(request, env)
-    }
+    if (url.pathname === '/api/chat' && request.method === 'POST') return handleChat(request, env)
+    if (url.pathname === '/api/auth' && request.method === 'POST') return handleAuth(request, env)
 
     if (url.pathname === '/api/health') {
-      return Response.json(
-        { status: 'ok', version: '2.0.0', time: new Date().toISOString() },
-        { headers: CORS }
-      )
+      return Response.json({ status: 'ok', v: '3.0', t: new Date().toISOString() }, { headers: CORS })
     }
 
     return new Response('Not Found', { status: 404, headers: CORS })
@@ -61,13 +72,10 @@ export default {
 async function handleAuth(request: Request, env: Env): Promise<Response> {
   try {
     const { pin } = await request.json() as { pin: string }
-    const correct = env.APP_PIN || '1234'
-    if (pin === correct) {
-      return Response.json({ success: true }, { headers: CORS })
-    }
+    if (pin === (env.APP_PIN || '1234')) return Response.json({ success: true }, { headers: CORS })
     return Response.json({ success: false }, { status: 401, headers: CORS })
   } catch {
-    return Response.json({ error: 'Invalid request' }, { status: 400, headers: CORS })
+    return Response.json({ error: 'Bad request' }, { status: 400, headers: CORS })
   }
 }
 
@@ -82,18 +90,12 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
     const { message, history = [] } = body
 
     if (!message?.trim()) {
-      return Response.json({ error: 'Message is required' }, { status: 400, headers: CORS })
+      return Response.json({ error: 'Message required' }, { status: 400, headers: CORS })
     }
 
-    // ✅ CORRECT Gemini model names (verified working as of Nov 2026)
-    const MODELS = [
-      'gemini-3.6-flash',
-      'gemini-3.8-flash',
-      'gemini-flash-latest',
-    ]
-
+    // Build conversation (keep last 20 turns for strong context)
     const contents = [
-      ...history.slice(-10).map((h) => ({
+      ...history.slice(-20).map(h => ({
         role: h.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: h.content }],
       })),
@@ -104,9 +106,11 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
       system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents,
       generationConfig: {
-        temperature: 0.7,
-        topP: 0.9,
-        maxOutputTokens: 1024,
+        temperature: 0.75,
+        topP: 0.92,
+        topK: 40,
+        maxOutputTokens: 2048,
+        candidateCount: 1,
       },
     })
 
@@ -116,67 +120,68 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
     for (const model of MODELS) {
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
       try {
+        // Per-model timeout: 14 seconds
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 14000)
+
         const res = await fetch(apiUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': env.GEMINI_API_KEY,
-          },
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
           body: requestBody,
+          signal: ctrl.signal,
         })
+        clearTimeout(timer)
 
         const data = await res.json() as any
 
         if (!res.ok) {
           lastError = data?.error?.message || `HTTP ${res.status}`
-          console.error(`[Jarvis] Model ${model} failed (${res.status}):`, lastError)
-          if (res.status === 400 || res.status === 401 || res.status === 403) break
+          console.error(`[Jarvis] ${model} → ${res.status}: ${lastError}`)
+          // Auth error — stop immediately
+          if (res.status === 401 || res.status === 403) break
           continue
         }
 
-        replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
         if (replyText) {
-          console.log(`[Jarvis] ✓ ${model} responded`)
+          console.log(`[Jarvis] ✓ ${model}`)
           break
         }
-      } catch (e) {
-        lastError = String(e)
-        console.error(`[Jarvis] Model ${model} threw:`, e)
+      } catch (e: any) {
+        lastError = e?.name === 'AbortError' ? `${model} timeout` : String(e)
+        console.error(`[Jarvis] ${model} error:`, lastError)
         continue
       }
     }
 
+    // If all models fail — give a smart Hinglish fallback, not a dead error
     if (!replyText) {
-      console.error('[Jarvis] All models failed. Last error:', lastError)
-      // Return a helpful Hindi fallback instead of a bare error
-      replyText = `Sir, अभी AI सर्वर से जुड़ने में थोड़ी दिक्कत है। कृपया एक पल में फिर बोलें।`
+      console.error('[Jarvis] All models failed:', lastError)
+      replyText = 'Sir, abhi AI servers thoda busy hain. Ek second mein dobara try karein — main ready hoon.'
     }
 
-    // Stream response as SSE chunks
-    const encoder = new TextEncoder()
+    // Stream response as SSE
+    const enc = new TextEncoder()
     const { readable, writable } = new TransformStream()
     const writer = writable.getWriter()
 
     ;(async () => {
-      const CHUNK = 60
+      const CHUNK = 70  // larger chunks = fewer round trips = faster display
       for (let i = 0; i < replyText.length; i += CHUNK) {
         await writer.write(
-          encoder.encode(`data: ${JSON.stringify({ text: replyText.slice(i, i + CHUNK) })}\n\n`)
+          enc.encode(`data: ${JSON.stringify({ text: replyText.slice(i, i + CHUNK) })}\n\n`)
         )
       }
-      await writer.write(encoder.encode('data: [DONE]\n\n'))
+      await writer.write(enc.encode('data: [DONE]\n\n'))
       await writer.close()
     })()
 
     return new Response(readable, {
-      headers: {
-        ...CORS,
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-      },
+      headers: { ...CORS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
     })
+
   } catch (err) {
-    console.error('[Jarvis] Chat handler error:', err)
-    return Response.json({ error: 'Internal server error' }, { status: 500, headers: CORS })
+    console.error('[Jarvis] Fatal:', err)
+    return Response.json({ error: 'Internal error' }, { status: 500, headers: CORS })
   }
 }

@@ -66,7 +66,7 @@ export default function VoiceScreen() {
 
     addMessage({ role: 'user', content })
     setSphereState('thinking')
-    setStatusText('सोच रहा हूँ...')
+    setStatusText('Soch raha hoon...')
     setLoading(true)
 
     const aiId = addMessage({ role: 'assistant', content: '', isStreaming: true })
@@ -74,47 +74,61 @@ export default function VoiceScreen() {
     try {
       const history = messages.slice(-8).map(m => ({ role: m.role, content: m.content }))
 
+      // 30-second timeout for the whole request
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30000)
+
       const response = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: content, mode: 'chat', history }),
+        signal: controller.signal,
       })
+      clearTimeout(timeout)
 
-      if (!response.ok) throw new Error('API error')
+      if (!response.ok) throw new Error(`API error ${response.status}`)
 
       const reader  = response.body!.getReader()
       const decoder = new TextDecoder()
       let full = ''
+      let sseBuffer = ''  // ← carry-buffer fixes split-chunk SSE bug
 
       setSphereState('speaking')
-      setStatusText('जवाब दे रहा हूँ...')
+      setStatusText('Jawab de raha hoon...')
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6))
-              if (data.text) {
-                full += data.text
-                updateMessage(aiId, full, true)
-              }
-            } catch {}
-          }
+        sseBuffer += decoder.decode(value, { stream: true })
+        const lines = sseBuffer.split('\n')
+        sseBuffer = lines.pop() || ''   // keep incomplete last line in buffer
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const jsonStr = line.slice(6).trim()
+          if (jsonStr === '[DONE]') continue
+          try {
+            const data = JSON.parse(jsonStr)
+            if (data.text) {
+              full += data.text
+              updateMessage(aiId, full, true)
+            }
+          } catch {}
         }
       }
 
       updateMessage(aiId, full, false)
-      setStatusText('बोल रहा हूँ...')
+      setStatusText('Bol raha hoon...')
 
       // Speak the response
       speak(full, () => {
         setSphereState('idle')
         setStatusText('')
       })
-    } catch {
-      const errMsg = 'क्षमा करें Sir, कुछ गड़बड़ हो गई। एक बार फिर बोलें।'
+    } catch (err: any) {
+      const isTimeout = err?.name === 'AbortError'
+      const errMsg = isTimeout
+        ? 'Sir, response aane mein time lag raha hai. Please try again.'
+        : 'Sorry Sir, kuch problem ho gayi. Dobara try karein.'
       updateMessage(aiId, errMsg, false)
       speak(errMsg, () => { setSphereState('idle'); setStatusText('') })
     } finally {

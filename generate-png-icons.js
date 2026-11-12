@@ -154,3 +154,4 @@ fs.writeFileSync(path.join(outDir, 'apple-touch-icon.png'), applePng)
 console.log(`✓ apple-touch-icon.png`)
 
 console.log('\n✅ All PNG icons generated!')
+
