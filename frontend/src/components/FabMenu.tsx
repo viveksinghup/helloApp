@@ -53,3 +53,4 @@ export default function FabMenu({ isOpen, onToggle, onClearChat, onLogout, onTog
     </div>
   )
 }
+

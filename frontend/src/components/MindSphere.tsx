@@ -152,3 +152,4 @@ export default function MindSphere({ state, size = 220 }: Props) {
     />
   )
 }
+

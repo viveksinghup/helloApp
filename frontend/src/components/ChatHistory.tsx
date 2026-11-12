@@ -32,3 +32,4 @@ export default function ChatHistory({ messages }: Props) {
     </div>
   )
 }
+

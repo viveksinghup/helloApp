@@ -6,9 +6,9 @@
 export interface Env {
   GEMINI_API_KEY: string
   APP_PIN: string
-  JARVIS_KV: KVNamespace
-  JARVIS_DB: D1Database
   ENVIRONMENT: string
+  JARVIS_KV?: KVNamespace   // optional — add later
+  JARVIS_DB?: D1Database    // optional — add later
 }
 
 // ─── CORS helper ──────────────────────────────────────────────────────────────
@@ -125,98 +125,78 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
       { role: 'user', parts: [{ text: message }] },
     ]
 
-    // Call Gemini API with streaming
-    // Model priority: 3.8-flash (best) → 3.6-flash (fallback) → gemini-flash-latest (last resort)
-    const PREFERRED_MODEL = 'gemini-3.8-flash'
-    const FALLBACK_MODEL  = 'gemini-3.6-flash'
-    const model = PREFERRED_MODEL
+    // Model priority: 3.6-flash (stable) → gemini-flash-latest → gemini-flash-lite-latest
+    const MODELS = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest']
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`
-
-    const geminiResponse = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemInstruction }] },
-        contents,
-        generationConfig: {
-          temperature: 0.7,
-          topP: 0.9,
-          maxOutputTokens: 2048,
-        },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        ],
-      }),
+    const requestBody = JSON.stringify({
+      system_instruction: { parts: [{ text: systemInstruction }] },
+      contents,
+      generationConfig: {
+        temperature: 0.7,
+        topP: 0.9,
+        maxOutputTokens: 2048,
+      },
     })
 
-    // If preferred model is unavailable (503/404), fall back to gemini-3.6-flash
-    let finalResponse = geminiResponse
-    if (!geminiResponse.ok) {
-      const errText = await geminiResponse.text()
-      const isRetryable = geminiResponse.status === 503 || geminiResponse.status === 404
-      if (isRetryable) {
-        const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${FALLBACK_MODEL}:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`
-        finalResponse = await fetch(fallbackUrl, {
+    // Try each model until one succeeds
+    let replyText = ''
+    let lastError = ''
+
+    for (const model of MODELS) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+      try {
+        const res = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: systemInstruction }] },
-            contents,
-            generationConfig: { temperature: 0.7, topP: 0.9, maxOutputTokens: 2048 },
-          }),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-goog-api-key': env.GEMINI_API_KEY,   // ← correct header auth
+          },
+          body: requestBody,
         })
-      }
-      if (!finalResponse.ok) {
-        console.error('Gemini error:', errText)
-        return Response.json(
-          { error: 'AI service error. Try again in a moment.' },
-          { status: 502, headers: CORS }
-        )
+
+        const data = await res.json() as any
+
+        if (!res.ok) {
+          lastError = data?.error?.message || `HTTP ${res.status}`
+          console.error(`Model ${model} failed (${res.status}):`, lastError)
+          if (res.status === 401 || res.status === 403) break  // bad key — stop trying
+          continue  // 503/404 → try next model
+        }
+
+        replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        if (replyText) {
+          console.log(`✓ Response from ${model}: ${replyText.slice(0, 60)}...`)
+          break
+        }
+      } catch (e) {
+        lastError = String(e)
+        console.error(`Model ${model} fetch error:`, e)
+        continue
       }
     }
 
-    // Stream Gemini SSE → Client SSE transform
+    if (!replyText) {
+      console.error('All models failed. Last error:', lastError)
+      return Response.json(
+        { error: 'AI service error. Try again in a moment.' },
+        { status: 502, headers: CORS }
+      )
+    }
+
+    // Send as SSE chunks for smooth frontend typing effect
+    const encoder = new TextEncoder()
     const { readable, writable } = new TransformStream()
     const writer = writable.getWriter()
-    const encoder = new TextEncoder()
 
-    // Process Gemini's SSE stream and forward to client
     ;(async () => {
-      const reader = finalResponse.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const jsonStr = line.slice(6).trim()
-            if (jsonStr === '[DONE]') continue
-            try {
-              const parsed = JSON.parse(jsonStr)
-              const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text
-              if (text) {
-                const sseChunk = `data: ${JSON.stringify({ text })}\n\n`
-                await writer.write(encoder.encode(sseChunk))
-              }
-            } catch {}
-          }
-        }
-      } finally {
-        await writer.write(encoder.encode('data: [DONE]\n\n'))
-        await writer.close()
+      const CHUNK = 50
+      for (let i = 0; i < replyText.length; i += CHUNK) {
+        await writer.write(
+          encoder.encode(`data: ${JSON.stringify({ text: replyText.slice(i, i + CHUNK) })}\n\n`)
+        )
       }
+      await writer.write(encoder.encode('data: [DONE]\n\n'))
+      await writer.close()
     })()
 
     return new Response(readable, {
@@ -224,7 +204,6 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
         ...CORS,
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'X-Content-Type-Options': 'nosniff',
       },
     })
   } catch (err) {

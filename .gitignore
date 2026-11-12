@@ -6,4 +6,5 @@ dist/
 .env.production
 *.log
 .DS_Store
+worker/.dev.vars
 

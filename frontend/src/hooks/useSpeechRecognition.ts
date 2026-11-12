@@ -51,3 +51,4 @@ export function useSpeechRecognition(onResult: (text: string) => void) {
 
   return { isListening, interimText, start, stop }
 }
+
