@@ -32,7 +32,7 @@ function fibonacciSphere(n, radius, cx, cy) {
 function makeSVG(size) {
   const cx = size / 2
   const cy = size / 2
-  const sphereR = size * 0.36
+  const sphereR = size * 0.44
   const nDots = size >= 400 ? 500 : 220
 
   const dots = fibonacciSphere(nDots, sphereR, cx, cy)

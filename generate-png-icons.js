@@ -99,8 +99,8 @@ function renderSphere(size) {
 
   // Fibonacci sphere dots
   const cx = size / 2, cy = size / 2
-  const sphereR = size * 0.34
-  const nDots = size >= 400 ? 480 : 200
+  const sphereR = size * 0.46   // bigger — fills icon nicely
+  const nDots = size >= 400 ? 600 : 260
   const golden = Math.PI * (3 - Math.sqrt(5))
 
   for (let i = 0; i < nDots; i++) {
