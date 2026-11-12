@@ -128,7 +128,12 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
     ]
 
     // Call Gemini API with streaming
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`
+    // Model priority: 3.8-flash (best) → 3.6-flash (fallback) → gemini-flash-latest (last resort)
+    const PREFERRED_MODEL = 'gemini-3.8-flash'
+    const FALLBACK_MODEL  = 'gemini-3.6-flash'
+    const model = PREFERRED_MODEL
+
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`
 
     const geminiResponse = await fetch(geminiUrl, {
       method: 'POST',
@@ -150,13 +155,30 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
       }),
     })
 
+    // If preferred model is unavailable (503/404), fall back to gemini-3.6-flash
+    let finalResponse = geminiResponse
     if (!geminiResponse.ok) {
-      const err = await geminiResponse.text()
-      console.error('Gemini error:', err)
-      return Response.json(
-        { error: 'AI service error. Check your API key.' },
-        { status: 502, headers: CORS }
-      )
+      const errText = await geminiResponse.text()
+      const isRetryable = geminiResponse.status === 503 || geminiResponse.status === 404
+      if (isRetryable) {
+        const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${FALLBACK_MODEL}:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`
+        finalResponse = await fetch(fallbackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemInstruction }] },
+            contents,
+            generationConfig: { temperature: 0.7, topP: 0.9, maxOutputTokens: 2048 },
+          }),
+        })
+      }
+      if (!finalResponse.ok) {
+        console.error('Gemini error:', errText)
+        return Response.json(
+          { error: 'AI service error. Try again in a moment.' },
+          { status: 502, headers: CORS }
+        )
+      }
     }
 
     // Stream Gemini SSE → Client SSE transform
@@ -166,7 +188,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
 
     // Process Gemini's SSE stream and forward to client
     ;(async () => {
-      const reader = geminiResponse.body!.getReader()
+      const reader = finalResponse.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
 
