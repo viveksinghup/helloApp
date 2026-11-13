@@ -1,98 +1,130 @@
 /**
- * TTS hook — works on iOS Safari, Android Chrome, desktop
- * iOS requires: speak() called in or close to a user gesture
- * Fix: pre-warm speechSynthesis on mount, use short utterances
+ * TTS hook — natural, human-sounding speech
+ * Fix: proper rate, clean punctuation pauses, correct lang for Hinglish
  */
 import { useRef, useCallback, useEffect } from 'react'
 
 export function useTTS() {
   const activeRef = useRef(false)
+  const timerRef  = useRef<ReturnType<typeof setTimeout>>()
+  const keepAliveRef = useRef<ReturnType<typeof setInterval>>()
 
-  // Pre-warm on mount (iOS Safari needs this to unlock audio)
+  // Pre-warm on mount so iOS unlocks audio
   useEffect(() => {
     if (!window.speechSynthesis) return
-    // Load voices
     window.speechSynthesis.getVoices()
-    // Fire a silent utterance so iOS unlocks TTS (must be on page load)
-    const warm = new SpeechSynthesisUtterance(' ')
+    // Silent utterance to unlock iOS audio context
+    const warm = new SpeechSynthesisUtterance('')
     warm.volume = 0
-    window.speechSynthesis.speak(warm)
+    try { window.speechSynthesis.speak(warm) } catch {}
   }, [])
 
   const speak = useCallback((text: string, onDone?: () => void) => {
     if (!window.speechSynthesis) { onDone?.(); return }
 
-    // Cancel anything playing
+    // Clear any previous timers
+    clearTimeout(timerRef.current)
+    clearInterval(keepAliveRef.current)
     window.speechSynthesis.cancel()
     activeRef.current = true
 
-    // Clean text
-    const clean = text
+    // ── Clean text for natural TTS ─────────────────────────────────────────
+    let clean = text
+      // Remove markdown
       .replace(/\*\*(.*?)\*\*/g, '$1')
       .replace(/\*(.*?)\*/g, '$1')
       .replace(/`(.*?)`/g, '$1')
       .replace(/#{1,6}\s?/g, '')
-      .replace(/\n+/g, '. ')
-      .replace(/\s+/g, ' ')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+
+      // Remove emojis (TTS reads them as "emoji" on some engines)
+      .replace(/[\u{1F300}-\u{1FFFF}]/gu, '')
+      .replace(/[\u2600-\u27FF]/g, '')
+
+      // Replace newlines with a brief pause word (not punctuation)
+      .replace(/\n+/g, ' ')
+
+      // KEY FIX: Remove mid-sentence periods that cause robotic pauses
+      // Replace "word. word" (short pause) with "word, word" (shorter pause)
+      // But keep end-of-sentence feel by just using comma
+      .replace(/\.\s+/g, ', ')
+
+      // Remove multiple commas/spaces
+      .replace(/,\s*,/g, ',')
+      .replace(/\s{2,}/g, ' ')
+
+      // Trim trailing punctuation
+      .replace(/[.,!?]+$/, '')
       .trim()
-      .slice(0, 500)   // keep it short — long TTS hangs on iOS
+
+      // Limit length to avoid iOS TTS cut-off
+      .slice(0, 400)
 
     if (!clean) { onDone?.(); return }
 
-    const utter = new SpeechSynthesisUtterance(clean)
-    utter.rate   = 1.0
-    utter.pitch  = 1.0
-    utter.volume = 1.0
+    const utter   = new SpeechSynthesisUtterance(clean)
+    utter.volume  = 1.0
+    utter.pitch   = 1.05   // slightly higher = sounds more natural/warm
 
-    // Pick best voice: prefer Hindi, then Indian English, then any English
+    // ── Voice selection — KEY for natural sound ────────────────────────────
     const voices = window.speechSynthesis.getVoices()
-    const hindi  = voices.find(v => v.lang.startsWith('hi'))
+
+    // Priority: Indian English > any English > default
+    // Do NOT use hi-IN — it makes Hinglish sound robotic
     const inEn   = voices.find(v => v.lang === 'en-IN')
-    const enUs   = voices.find(v => v.lang.startsWith('en'))
-    const picked = hindi || inEn || enUs
-    if (picked) { utter.voice = picked; utter.lang = picked.lang }
-    else { utter.lang = 'en-IN' }
+    const enGB   = voices.find(v => v.lang === 'en-GB')
+    const enAU   = voices.find(v => v.lang === 'en-AU')  // smoother than US
+    const enUS   = voices.find(v => v.lang.startsWith('en-US'))
+    const anyEn  = voices.find(v => v.lang.startsWith('en'))
 
-    utter.onend = () => { activeRef.current = false; onDone?.() }
-    utter.onerror = () => { activeRef.current = false; onDone?.() }
+    const picked = inEn || enGB || enAU || enUS || anyEn
 
-    // iOS Chrome bug: speechSynthesis pauses after ~15s — keep it alive
-    const keepAlive = setInterval(() => {
-      if (!window.speechSynthesis.speaking) { clearInterval(keepAlive); return }
+    if (picked) {
+      utter.voice = picked
+      utter.lang  = picked.lang
+      // Adjust rate per voice type — Indian English needs slightly slower
+      utter.rate  = picked.lang === 'en-IN' ? 1.08 : 1.12
+    } else {
+      utter.lang = 'en-IN'
+      utter.rate = 1.08
+    }
+
+    const done = () => {
+      clearTimeout(timerRef.current)
+      clearInterval(keepAliveRef.current)
+      activeRef.current = false
+      onDone?.()
+    }
+
+    utter.onend   = done
+    utter.onerror = done
+
+    // iOS keep-alive: speechSynthesis pauses after ~15s without this
+    keepAliveRef.current = setInterval(() => {
+      if (!window.speechSynthesis.speaking) {
+        clearInterval(keepAliveRef.current)
+        return
+      }
       window.speechSynthesis.pause()
       window.speechSynthesis.resume()
     }, 10000)
 
-    window.speechSynthesis.speak(utter)
-
-    // Safety fallback: if onend never fires (iOS bug), call after estimated duration
-    const wordCount = clean.split(' ').length
-    const estimatedMs = Math.max(3000, wordCount * 350)
-    const safetyTimer = setTimeout(() => {
+    // Safety fallback if onend never fires (iOS bug)
+    const words     = clean.split(' ').length
+    const safetyMs  = Math.max(4000, (words / utter.rate) * 400 + 2000)
+    timerRef.current = setTimeout(() => {
       if (activeRef.current) {
-        clearInterval(keepAlive)
-        activeRef.current = false
         window.speechSynthesis.cancel()
-        onDone?.()
+        done()
       }
-    }, estimatedMs + 2000)
+    }, safetyMs)
 
-    // Clear safety timer when utterance ends normally
-    const origOnend = utter.onend
-    utter.onend = (e) => {
-      clearTimeout(safetyTimer)
-      clearInterval(keepAlive)
-      ;(origOnend as any)?.(e)
-    }
-    const origOnerror = utter.onerror
-    utter.onerror = (e) => {
-      clearTimeout(safetyTimer)
-      clearInterval(keepAlive)
-      ;(origOnerror as any)?.(e)
-    }
+    window.speechSynthesis.speak(utter)
   }, [])
 
   const stop = useCallback(() => {
+    clearTimeout(timerRef.current)
+    clearInterval(keepAliveRef.current)
     activeRef.current = false
     window.speechSynthesis?.cancel()
   }, [])
