@@ -1,0 +1,7 @@
+# Cloudflare Pages _headers
+# Required for WebGPU + SharedArrayBuffer (needed by Kokoro WASM threads)
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: cross-origin
+

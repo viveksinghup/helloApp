@@ -1,11 +1,15 @@
 /**
- * Jarvis AI Worker v4 — Simple JSON response (no SSE streaming)
- * SSE was causing mobile issues. JSON is simpler and more reliable.
+ * Jarvis AI Worker v5
+ * - POST /api/transcribe  → Cloudflare Workers AI Whisper (free STT)
+ * - POST /api/chat        → Gemini AI (free LLM)
+ * - POST /api/auth        → PIN check
+ * - GET  /api/health      → health check
  */
 
 export interface Env {
   GEMINI_API_KEY: string
   APP_PIN: string
+  AI: Ai   // Cloudflare Workers AI binding
 }
 
 const CORS = {
@@ -31,7 +35,7 @@ RULES:
 Today: ${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
 Time: ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })} IST`
 
-const MODELS = [
+const GEMINI_MODELS = [
   'gemini-flash-lite-latest',
   'gemini-3.5-flash-lite',
   'gemini-flash-latest',
@@ -43,27 +47,46 @@ export default {
     const url = new URL(request.url)
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS })
 
-    if (url.pathname === '/api/chat' && request.method === 'POST') return handleChat(request, env)
-    if (url.pathname === '/api/auth' && request.method === 'POST') return handleAuth(request, env)
-    if (url.pathname === '/api/health') {
+    if (url.pathname === '/api/transcribe' && request.method === 'POST')
+      return handleTranscribe(request, env)
+    if (url.pathname === '/api/chat' && request.method === 'POST')
+      return handleChat(request, env)
+    if (url.pathname === '/api/auth' && request.method === 'POST')
+      return handleAuth(request, env)
+    if (url.pathname === '/api/health')
       return Response.json({ ok: true, t: Date.now() }, { headers: CORS })
-    }
+
     return new Response('Not Found', { status: 404, headers: CORS })
   },
 }
 
-async function handleAuth(req: Request, env: Env): Promise<Response> {
+// ── STT: Cloudflare Workers AI Whisper ───────────────────────────────────────
+async function handleTranscribe(req: Request, env: Env): Promise<Response> {
   try {
-    const { pin } = await req.json() as { pin: string }
-    return Response.json(
-      { success: pin === (env.APP_PIN || '1234') },
-      { status: pin === (env.APP_PIN || '1234') ? 200 : 401, headers: CORS }
-    )
-  } catch {
-    return Response.json({ success: false }, { status: 400, headers: CORS })
+    const formData = await req.formData()
+    const audioFile = formData.get('audio') as File | null
+
+    if (!audioFile) {
+      return Response.json({ error: 'No audio file' }, { status: 400, headers: CORS })
+    }
+
+    const arrayBuffer = await audioFile.arrayBuffer()
+    const uint8Array   = new Uint8Array(arrayBuffer)
+
+    // Run Whisper on Cloudflare Workers AI — free tier: ~240 min/day
+    const result = await env.AI.run('@cf/openai/whisper-large-v3-turbo', {
+      audio: [...uint8Array],
+    }) as { text?: string; vtt?: string }
+
+    const text = (result.text || '').trim()
+    return Response.json({ text }, { headers: CORS })
+  } catch (err) {
+    console.error('[Whisper] Error:', err)
+    return Response.json({ text: '' }, { status: 500, headers: CORS })
   }
 }
 
+// ── LLM: Gemini ──────────────────────────────────────────────────────────────
 async function handleChat(req: Request, env: Env): Promise<Response> {
   try {
     const { message, history = [] } = await req.json() as {
@@ -89,7 +112,7 @@ async function handleChat(req: Request, env: Env): Promise<Response> {
       generationConfig: { temperature: 0.75, maxOutputTokens: 800, topP: 0.92 },
     })
 
-    for (const model of MODELS) {
+    for (const model of GEMINI_MODELS) {
       try {
         const ctrl  = new AbortController()
         const timer = setTimeout(() => ctrl.abort(), 15000)
@@ -112,24 +135,32 @@ async function handleChat(req: Request, env: Env): Promise<Response> {
         }
 
         const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-        if (reply) {
-          return Response.json({ reply }, { headers: CORS })
-        }
+        if (reply) return Response.json({ reply }, { headers: CORS })
       } catch {
         continue
       }
     }
 
-    // All models failed — friendly fallback
     return Response.json(
-      { reply: 'Sir, AI servers thoda busy hain. Ek second mein dobara try karein.' },
+      { reply: 'Sir, AI servers thoda busy hain aur ek second mein dobara try karein.' },
       { headers: CORS }
     )
   } catch (err) {
     console.error('[Jarvis] Fatal:', err)
     return Response.json(
-      { reply: 'Sir, kuch technical problem aa gayi. Please try again.' },
+      { reply: 'Sir, kuch technical problem aa gayi toh please try again karein.' },
       { status: 500, headers: CORS }
     )
+  }
+}
+
+// ── Auth: PIN ─────────────────────────────────────────────────────────────────
+async function handleAuth(req: Request, env: Env): Promise<Response> {
+  try {
+    const { pin } = await req.json() as { pin: string }
+    const ok = pin === (env.APP_PIN || '1234')
+    return Response.json({ success: ok }, { status: ok ? 200 : 401, headers: CORS })
+  } catch {
+    return Response.json({ success: false }, { status: 400, headers: CORS })
   }
 }

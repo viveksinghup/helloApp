@@ -7,19 +7,10 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 ENVIRONMENT = "production"
 
+# ─── Cloudflare Workers AI (Whisper STT — FREE) ───────────────────────────────
+[ai]
+binding = "AI"
+
 # ─── Secrets (set via CLI, never commit) ──────────────────────────────────────
 # wrangler secret put GEMINI_API_KEY
 # wrangler secret put APP_PIN
-
-# ─── To add KV / D1 later ─────────────────────────────────────────────────────
-# Step 1: npx wrangler kv namespace create JARVIS_KV  → copy id below
-# Step 2: npx wrangler d1 create jarvis-db            → copy id below
-#
-# [[kv_namespaces]]
-# binding = "JARVIS_KV"
-# id = "PASTE_REAL_ID_HERE"
-#
-# [[d1_databases]]
-# binding = "JARVIS_DB"
-# database_name = "jarvis-db"
-# database_id = "PASTE_REAL_ID_HERE"

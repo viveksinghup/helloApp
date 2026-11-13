@@ -35,6 +35,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Don't cache ONNX model files or the large kokoro bundle
+        globIgnores: ['**/*.onnx', '**/*.bin', '**/kokoro-*.js', '**/ort-wasm-*.wasm'],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB limit
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.workers\.dev\/api\/.*/i,
@@ -49,6 +52,12 @@ export default defineConfig({
       }
     })
   ],
+
+  // ── Kokoro / ONNX Runtime: exclude from Vite's dep optimizer ───────────────
+  optimizeDeps: {
+    exclude: ['kokoro-js', 'onnxruntime-web'],
+  },
+
   server: {
     port: 5173,
     proxy: {
@@ -56,7 +65,11 @@ export default defineConfig({
         target: 'http://localhost:8787',
         changeOrigin: true
       }
+    },
+    // Required headers for WebGPU + SharedArrayBuffer in dev
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
     }
   }
 })
-
